@@ -5,12 +5,14 @@ CONFIG -= qt
 
 SOURCES += main.cpp \
     HOGLib/fhog.cpp \
-    KCFTracker/kcfTracker.cpp
+    KCFTracker/kcfTracker.cpp \
+    Utilities/saliency.cpp
 
 INCLUDEPATH += `pkg-config --cflags opencv`
 LIBS += `pkg-config --libs opencv`
 
 HEADERS += \
-    utils.h \
     HOGLib/fhog.hpp \
-    KCFTracker/kcfTracker.h
+    KCFTracker/kcfTracker.h \
+    Utilities/utils.h \
+    Utilities/saliency.h \
