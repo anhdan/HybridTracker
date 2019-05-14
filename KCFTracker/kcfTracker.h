@@ -2,6 +2,9 @@
 #define KCFTRACKER_H
 
 #include "Utilities/utils.h"
+#include "HOGLib/fhog.hpp"
+#include "Utilities/gme.h"
+#include "Utilities/kalman.h"
 
 
 class KCFTracker
@@ -46,28 +49,28 @@ private:
     /**
      * @brief train
      * @param _targetMap
+     * @param _rgbPatch
      * @param _learningRate
      * @return
      */
-    htError_t train( const cv::Mat &_targetMap, const float _learningRate );
+    htError_t train( const cv::Mat &_targetMap, const cv::Mat &_rgbPatch, const float _learningRate );
 
 public:
     /**
-     * @brief initTrack
+     * @brief init
      * @param _rgb
      * @param _initCenter
      * @param _initSize
      * @return
      */
-    htError_t initTrack( const cv::Mat &_rgb, const cv::Point &_initCenter, const cv::Size &_initSize );
+    htError_t init( const cv::Mat &_rgb, const cv::Point &_initCenter, const cv::Size &_initSize );
 
     /**
-     * @brief performTrack
+     * @brief process
      * @param _rgb
-     * @param _prevCenter
      * @return
      */
-    htError_t performTrack( const cv::Mat &_rgb, const cv::Point &_prevCenter );
+    htError_t process( const cv::Mat &_rgb );
 
     /**
      * @brief getLocation
@@ -75,6 +78,12 @@ public:
      * @param _size
      */
     void getLocation( cv::Point &_center, cv::Point &_size );
+
+    /**
+     * @brief getLocation
+     * @param _bound
+     */
+    void getLocation( cv::Rect &_bound );
 
     /**
      * @brief getTrackStatus
@@ -88,10 +97,7 @@ private:
     cv::Mat         m_K;
     cv::Mat         m_Y;
     cv::Mat         m_Hann;
-
-    cv::Mat         m_featureMap;
     cv::Mat         m_tmplMap;
-    cv::Mat         m_targetMap;
 
     // Scale & Rotation model data
     float           m_scale;
@@ -100,9 +106,13 @@ private:
     // Occlusion model data
     cv::Mat         m_Tukey;
     cv::Mat         m_tmplRGB;
-    cv::Mat         m_targetRGB;
+
+    // GME and Kalman for new position prediction
+    GME             m_gme;
+    Kalman          m_kalman;
 
     // Tracking object parameters
+    cv::Size        m_config;
     cv::Size        m_tmplSize;
     cv::Point3i     m_feaMapSize;
     TrackStatus     m_trackStatus;
