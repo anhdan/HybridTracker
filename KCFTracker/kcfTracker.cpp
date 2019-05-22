@@ -19,6 +19,9 @@ KCFTracker::KCFTracker() : m_gme(GMEType::RIGID_TRANSFORM)
  */
 KCFTracker::~KCFTracker()
 {
+    free( m_tmplHist );
+    free( m_targetHist );
+
     LOG_MSG( "[DEB] A new KCF tracker has been destroyed\n" );
 }
 
@@ -215,7 +218,8 @@ htError_t KCFTracker::train( const cv::Mat &_targetMap, const cv::Mat &_rgbPatch
     m_tmplMap = _learningRate * _targetMap + (1 - _learningRate) * m_tmplMap;
 
     // Update color patch template
-    m_tmplRGB = _learningRate * _rgbPatch + (1 - _learningRate) * m_tmplRGB;
+//    m_tmplRGB = _learningRate * _rgbPatch + (1 - _learningRate) * m_tmplRGB;
+    cv::addWeighted( _rgbPatch, _learningRate, m_tmplRGB, 1 - _learningRate, 0.0, m_tmplRGB );
 
     return htSuccess;
 }
@@ -263,9 +267,7 @@ htError_t KCFTracker::init( const cv::Mat &_rgb, const cv::Point &_initCenter, c
     //===== 2. Initialize tracking model
     htError_t err = htSuccess;
     // Create Hanning window
-    err |= kcf::createHanningWindow( m_Hann, m_feaMapSize.x, m_feaMapSize.y, m_feaMapSize.z );
-
-    graphix::writeMatToText( "hanning.txt", m_Hann );
+    err |= kcf::createHanningWindow( m_Hann, m_feaMapSize.x, m_feaMapSize.y, m_feaMapSize.z );    
 
     // Create Gaussian response
     float sigma = sqrt( (float)(m_feaMapSize.x * m_feaMapSize.y) ) / KCF_PADD_RATIO * KCF_GAUSS_RES_SIGMA;
@@ -273,7 +275,8 @@ htError_t KCFTracker::init( const cv::Mat &_rgb, const cv::Point &_initCenter, c
     err |= kcf::createGaussianWindow( y, m_feaMapSize.x, m_feaMapSize.y, sigma );
     err |= kcf::fftd( y, m_Y, false );
 
-    graphix::writeMatToText( "gauss.txt", y );
+    // Create Tukey window for histogram computation
+    err |= kcf::createTukeyWindow( m_Tukey, m_tmplSize.width, m_tmplSize.height, 0.5, 0.5 );
 
     if( err != htSuccess )
     {
@@ -282,27 +285,35 @@ htError_t KCFTracker::init( const cv::Mat &_rgb, const cv::Point &_initCenter, c
         return err;
     }
 
-    // Initialize template feature and correlation filter
-    std::cout << "===========> 5" << std::endl;
-    cv::Mat patchGray, patchRGB, feaMap;
-    err |= getPatch( _rgb, patchGray, patchRGB, m_objBound, 1.0 );
+    // Allocate memory for histogram vector
+    m_histLen    = KCF_HISTOGRAM_BINS * 3;
+    m_tmplHist   = (float*)malloc( m_histLen * sizeof( float ) );
+    m_targetHist = (float*)malloc( m_histLen * sizeof( float ) );
+    if( m_tmplHist == NULL || m_targetHist == NULL )
+    {
+        free( m_tmplHist );
+        free( m_targetHist );
+        LOG_MSG( "[ERR] %s:%d: status = %d: Failed to allocate memory\n",
+                 __FUNCTION__, __LINE__, htErrorNotAllocated );
+        htErrorNotAllocated;
+    }
 
-    std::cout << "===========> 4" << "\t" << patchGray.size() << "\t" << m_tmplSize << std::endl;
+    // Initialize template feature and correlation filter
+    cv::Mat patchGray, feaMap;
+    err |= getPatch( _rgb, patchGray, m_tmplRGB, m_objBound, 1.0 );
 
     err |= extractHOG( patchGray, feaMap );
 
-    std::cout << "===========> 3" << std::endl;
-
-    err |= train( feaMap, patchRGB, 1.0 );
+    err |= train( feaMap, m_tmplRGB, 1.0 );
 
     if( err != htSuccess )
     {
+        free( m_tmplHist );
+        free( m_targetHist );
         LOG_MSG( "[ERR] %s:%d: status = %d: Failed to initialize template feature and correlation filter\n",
                  __FUNCTION__, __LINE__, err );
         return err;
     }
-
-    std::cout << "===========> 2" << std::endl;
 
     //===== 3. Initialize GME and Kalman filter for position prediction
     m_gme.process( _rgb );
@@ -311,8 +322,6 @@ htError_t KCFTracker::init( const cv::Mat &_rgb, const cv::Point &_initCenter, c
 
     m_trackStatus  = TrackStatus::IN_VISION;
     m_occFramesCnt = 0;
-
-    std::cout << "===========> 1" << std::endl;
 
     return htSuccess;
 }
@@ -396,8 +405,24 @@ htError_t KCFTracker::process( const cv::Mat &_rgb )
           kcfH  = m_objBound.size.height * relativeScale;
 
     //===== 3. Detect occlusion
-    //! FIXIT: Add histogram-based occlusion detection
-    if( psr < 5.0 )
+    std::cout << m_tmplRGB.type() << "\t" << CV_8UC3 << std::endl;
+    err |= kcf::computeHistogram( m_tmplRGB, m_Tukey, KCF_HISTOGRAM_BINS, m_tmplHist );
+    err |= kcf::computeHistogram( rgbPatch, m_Tukey, KCF_HISTOGRAM_BINS, m_targetHist );
+    if( err != htSuccess )
+    {
+        LOG_MSG( "[ERR] %s:%d: status = %d: Failed to compute histogram\n",
+                 __FUNCTION__, __LINE__, err );
+        return err;
+    }
+
+    float bhattCoeff = kcf::computeBhattacharyaCoeff( m_tmplHist, m_targetHist, m_histLen );
+    LOG_MSG( "\n[DEB]: %s:%d: Bhattacharrya coeff = %f\n", __FUNCTION__, __LINE__, bhattCoeff );
+
+    if( bhattCoeff > KCF_HIST_OCC_THRESH )
+    {
+        m_trackStatus = TrackStatus::OCCLUDED;
+    }
+    else if( psr < KCF_PSR_OCC_THRESH )
     {
         m_trackStatus = TrackStatus::OCCLUDED;
     }
