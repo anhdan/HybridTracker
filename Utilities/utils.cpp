@@ -184,6 +184,74 @@ namespace kcf {
     }
 
 
+    htError_t createTukeyWindow( cv::Mat &_tukey, const int _dimX, const int _dimY, const float _alphaX, const float _alphaY )
+    {
+        if( (_dimX <= 0) || (_dimY <= 0) )
+        {
+            LOG_MSG( "[ERR] %s:%d: status = %d: Invalid input dimensions\n",
+                     __FUNCTION__, __LINE__, htErrorInvalidParameters );
+            return htErrorInvalidParameters;
+        }
+
+        if( (_alphaX <= 0) || (_alphaY <= 0) || (_alphaX > 1) || (_alphaY  > 1) )
+        {
+            LOG_MSG( "[ERR] %s:%d: status = %d: Invalid Tukey factors\n",
+                     __FUNCTION__, __LINE__, htErrorInvalidParameters );
+            return htErrorInvalidParameters;
+        }
+
+        // Create 1-D Tukey windows
+        cv::Mat tukeyX = cv::Mat::zeros( 1, _dimX, CV_32FC1 );
+        cv::Mat tukeyY = cv::Mat::zeros( _dimY, 1, CV_32FC1 );
+
+        float haX = _alphaX / 2.0,
+              haY = _alphaY / 2.0;
+
+        float NX = (float)_dimX - 1,
+              NY = (float)_dimY - 1;
+
+        int lowerBound = (int)(NX * haX),
+            upperBound = (int)(NX * (1 - haX));
+        for( int i = 0; i < _dimX; i++ )
+        {
+            if( i <= lowerBound )
+            {
+                tukeyX.at<float>(i) = 0.5 * (1 + cosf( CV_PI * ((float)i / (haX * NX) - 1) ));
+            }
+            else if( i <= upperBound )
+            {
+                tukeyX.at<float>(i) = 1.0;
+            }
+            else
+            {
+                tukeyX.at<float>(i) = 0.5 * (1 + cosf( CV_PI * ((float)i / (haX * NX) - 1.0 / haX + 1) ));
+            }
+        }
+
+        lowerBound = (int)(NY * haY),
+        upperBound = (int)(NY * (1 - haY));
+        for( int i = 0; i < _dimY; i++ )
+        {
+            if( i <= lowerBound )
+            {
+                tukeyY.at<float>(i) = 0.5 * (1 + cosf( CV_PI * ((float)i / (haY * (float)NY) - 1) ));
+            }
+            else if( i <= upperBound )
+            {
+                tukeyY.at<float>(i) = 1.0;
+            }
+            else
+            {
+                tukeyY.at<float>(i) = 0.5 * (1 + cosf( CV_PI * ((float)i / (haY * (float)NY) - 1.0 / haY + 1) ));
+            }
+        }
+
+        // 2-D Tukey window is obtained by multiplying two 1-D windows
+        _tukey = tukeyY * tukeyX;
+
+        return htSuccess;
+    }
+
     /**
      * @brief gaussianCorrelation
      */
@@ -341,6 +409,105 @@ namespace kcf {
         return htSuccess;
     }
 
+
+    /**
+     * @brief computeHistogram
+     */
+    htError_t computeHistogram( const cv::Mat &_img, const cv::Mat &_mask, const int _binsPerChannel, float *_hist )
+    {
+        if( _img.empty() || _hist == NULL )
+        {
+            LOG_MSG( "[ERR] %s:%d: status = %d: Empty input matrix or null pointer\n",
+                     __FUNCTION__, __LINE__, htErrorNotAllocated );
+            return htErrorNotAllocated;
+        }
+
+        if( !_mask.empty() && ((_mask.cols != _img.cols) || (_mask.rows != _img.rows)) )
+        {
+            LOG_MSG( "[ERR] %s:%d: status = %d: Two matrice must be equal in size\n",
+                     __FUNCTION__, __LINE__, htErrorNotCompatible );
+            return htErrorNotCompatible;
+        }
+
+        // Compute marginal histogram
+        int binWidth = 255 / _binsPerChannel;
+        int channels = _img.channels();
+        unsigned char *imgData = (unsigned char*)_img.data;
+        memset( _hist, 0, channels * _binsPerChannel * sizeof( float ) );
+        float sum = 0.0;
+        for( int r = 0; r < _img.rows; r++ )
+        {
+            for( int c = 0; c < _img.cols; c++ )
+            {
+                int id = (r * _img.cols + c) * channels;
+                float w = 1.0;
+                if( !_mask.empty() )
+                {
+                    w = _mask.at<float>(r, c);
+                }
+
+                for( int ch = 0; ch < channels; ch++ )
+                {
+                    int histId = imgData[id+ch] / binWidth;
+                    histId = (histId < _binsPerChannel) ? histId : _binsPerChannel-1;
+                    _hist[histId + ch*_binsPerChannel] += w;
+                }
+                sum += channels * w;
+            }
+        }
+
+        // Normalize
+        int len = channels * _binsPerChannel;
+        if( sum > 0 )
+        {
+            for( int i = 0; i < len; i++ )
+            {
+                _hist[i] /= sum;
+            }
+        }
+
+        return htSuccess;
+    }
+
+    
+    /**
+     * @brief computeBhattacharyaCoeff
+     * @param _vec1
+     * @param _vec2
+     * @param _len
+     * @return 
+     */
+    float computeBhattacharyaCoeff( const float *_vec1, const float *_vec2, const int _len )
+    {
+        if( _vec1 == NULL || _vec2 == NULL )
+        {
+            return 0.0;
+        }
+
+        double sum  = 0.0,
+               sum1 = 0.0,
+               sum2 = 0.0;
+        for( int i = 0; i < _len; i++ )
+        {
+
+            if( _vec1[i] < 0 || _vec2[i] < 0 )
+            {
+                return 0.0;
+            }
+            double prod = _vec1[i] * _vec2[i];
+            sum  += sqrt( prod );
+            sum1 += (double)_vec1[i];
+            sum2 += (double)_vec2[i];
+        }
+
+        if( sum1 == 0 || sum2 == 0)
+        {
+            return 0.0;
+        }
+
+        double bhat = sum / sqrt(sum1) / sqrt(sum2);
+        return (float)acos( bhat ) * 180.0 / CV_PI;
+    }
 }
 
 namespace graphix {

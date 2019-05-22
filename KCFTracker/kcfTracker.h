@@ -106,6 +106,9 @@ private:
     // Occlusion model data
     cv::Mat         m_Tukey;
     cv::Mat         m_tmplRGB;
+    float*          m_tmplHist;
+    float*          m_targetHist;
+    int             m_histLen;
 
     // GME and Kalman for new position prediction
     GME             m_gme;

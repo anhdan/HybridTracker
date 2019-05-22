@@ -34,7 +34,8 @@ enum htError_enum
     htSuccess = 0,                      /**< Success */
     htErrorInvalidParameters = -1,      /**< Invalid input parameters */
     htErrorNotAllocated = -2,           /**< A pointer was not allocated */
-    htErrorProcessFailure = -3          /**< An unspecified failure in processing a function */
+    htErrorNotCompatible = -3,          /**< Two objects are not compatible to be processed */
+    htErrorProcessFailure               /**< An unspecified failure in processing a function */
 };
 
 typedef int htError_t;
@@ -75,6 +76,9 @@ enum class TrackStatus : int
 #define     KCF_LAMDA               1e-4    /**< Additive to avoid division by zero */
 #define     KCF_LEARNING_RATE       0.015   /**< Learning rate */
 #define     KCF_MAX_OCCLUDED_FRAMES 30      /**< Number of frames in which object is occluded before it is considered to be lost*/
+#define     KCF_HISTOGRAM_BINS      16      /**< Number of histogram bins in each marginal color histogram vector of a color image */
+#define     KCF_HIST_OCC_THRESH     30      /**< Histogram disimilarity threshold to detect object occlusion using color information */
+#define     KCF_PSR_OCC_THRESH      7       /**< Peak-To-Sidelope threshold to detect object occlusion based on correlation response map */
 
 /***************************************************
  *              Macros
@@ -137,6 +141,19 @@ namespace kcf {
      */
     htError_t createGaussianWindow( cv::Mat &_gauss, const int _dimX, const int _dimY, const float _sigma );
 
+
+    /**
+     * @brief createTukeyWindow
+     * @param _tukey
+     * @param _dimX
+     * @param _dimY
+     * @param _alphaX
+     * @param _alphaY
+     * @return
+     */
+    htError_t createTukeyWindow( cv::Mat &_tukey, const int _dimX, const int _dimY, const float _alphaX, const float _alphaY );
+
+
     /**
      * @brief gaussianCorrelation
      * @param _x
@@ -178,6 +195,27 @@ namespace kcf {
      * @return
      */
     htError_t decomposeTransform( const cv::Mat &_trans, float *_dx, float *_dy, float *_rot, float *_scale );
+
+
+    /**
+     * @brief computeHistogram
+     * @param _img
+     * @param _mask
+     * @param _binsPerChannel
+     * @param _hist
+     * @return
+     */
+    htError_t computeHistogram( const cv::Mat &_img, const cv::Mat &_mask, const int _binsPerChannel, float *_hist );
+
+
+    /**
+     * @brief computeBhattacharyaCoeff
+     * @param _vec1
+     * @param _vec2
+     * @param _len
+     * @return
+     */
+    float computeBhattacharyaCoeff( const float *_vec1, const float *_vec2, const int _len );
 }
 
 namespace graphix {
